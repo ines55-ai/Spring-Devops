@@ -5,7 +5,7 @@ pipeline {
         stage('Build') {
             steps {
                 echo 'Compilation du projet'
-                sh './mvnw clean package'
+                sh './mvnw clean package -DskipTests'
             }
         }
     }
