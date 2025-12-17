@@ -1,10 +1,10 @@
 pipeline {
     agent any
 
-    environment {
-        JAVA_HOME = '/usr/lib/jvm/java-17-openjdk'
-        PATH = "${JAVA_HOME}/bin:${env.PATH}"
-    }
+   environment {
+    JAVA_HOME = '/usr/lib/jvm/java-17-openjdk'  // chemin exact de ton Java
+    PATH = "${JAVA_HOME}/bin:${env.PATH}"
+}
 
     stages {
         stage('Checkout SCM') {
@@ -39,6 +39,13 @@ pipeline {
                 echo "Déploiement (si nécessaire)"
             }
         }
+        stage('Check Java') {
+    steps {
+        sh 'java -version'
+        sh 'echo $JAVA_HOME'
+    }
+}
+
     }
 
     post {
