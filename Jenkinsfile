@@ -32,39 +32,46 @@ pipeline {
       }
     }
 
-    stage('Start MySQL (Docker)') {
-      steps {
-        sh '''
-          set -e
+   stage('Start MySQL (Docker)') {
+  steps {
+    sh '''
+      set -e
 
-          if docker ps -a --format '{{.Names}}' | grep -wq "${MYSQL_CONTAINER}"; then
-            docker rm -f "${MYSQL_CONTAINER}" || true
-          fi
+      # Supprimer le container s’il existe (sans erreur)
+      docker rm -f ${MYSQL_CONTAINER} >/dev/null 2>&1 || true
 
-          echo "Starting MySQL on host port ${MYSQL_HOST_PORT}..."
-          docker run -d --name "${MYSQL_CONTAINER}" \
-            -e MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}" \
-            -e MYSQL_DATABASE="${MYSQL_DB}" \
-            -e MYSQL_USER="${MYSQL_USER}" \
-            -e MYSQL_PASSWORD="${MYSQL_PASSWORD}" \
-            -p ${MYSQL_HOST_PORT}:3306 \
-            mysql:8.0
+      echo "Starting MySQL on port ${MYSQL_HOST_PORT}..."
+      docker run -d --name ${MYSQL_CONTAINER} \
+        -e MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD} \
+        -e MYSQL_DATABASE=${MYSQL_DB} \
+        -e MYSQL_USER=${MYSQL_USER} \
+        -e MYSQL_PASSWORD=${MYSQL_PASSWORD} \
+        -p ${MYSQL_HOST_PORT}:3306 \
+        mysql:8.0
 
-          echo "Waiting for MySQL..."
-          for i in {1..60}; do
-            if docker exec "${MYSQL_CONTAINER}" mysqladmin ping -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent; then
-              echo "MySQL is ready"
-              exit 0
-            fi
-            sleep 2
-          done
+      echo "Waiting for MySQL to be ready (up to 120s)..."
+      READY=0
+      for i in $(seq 1 60); do
+        if docker exec ${MYSQL_CONTAINER} \
+          mysqladmin ping -uroot -p${MYSQL_ROOT_PASSWORD} --silent >/dev/null 2>&1; then
+          READY=1
+          break
+        fi
+        echo "  still starting... (${i}/60)"
+        sleep 2
+      done
 
-          echo "MySQL not ready"
-          docker logs "${MYSQL_CONTAINER}" | tail -n 200 || true
-          exit 1
-        '''
-      }
-    }
+      if [ "$READY" -ne 1 ]; then
+        echo "MySQL failed to become ready in time"
+        docker logs ${MYSQL_CONTAINER} | tail -n 200 || true
+        exit 1
+      fi
+
+      echo "MySQL is ready ✅"
+    '''
+  }
+}
+
 
     stage('Prepare test DB config') {
       steps {
