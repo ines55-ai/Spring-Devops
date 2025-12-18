@@ -5,73 +5,74 @@ pipeline {
     JAVA_HOME = '/usr/lib/jvm/java-17-openjdk'
     PATH = "${JAVA_HOME}/bin:${env.PATH}"
 
-    // MySQL Docker
+    // MySQL Docker (host port 3307 to avoid 3306 conflict)
     MYSQL_CONTAINER = 'mysql-ci'
     MYSQL_DB = 'spring_devops_db'
     MYSQL_USER = 'springuser'
     MYSQL_PASSWORD = 'springpass123'
     MYSQL_ROOT_PASSWORD = 'rootpass123'
-    MYSQL_HOST_PORT = '3307'   // ✅ évite conflit avec 3306
+    MYSQL_HOST_PORT = '3307'
   }
 
   stages {
+
     stage('Checkout SCM') {
       steps {
-        // Option 1: si tu as configuré SCM dans le job Jenkins, garde checkout scm
-        // checkout scm
-
-        // Option 2 (recommandé): forcer ton repo
         git branch: 'main', url: 'https://github.com/ines55-ai/Spring-Devops.git'
       }
     }
 
     stage('Set Executable') {
       steps {
-        echo "Rendre mvnw exécutable"
         sh 'chmod +x ./mvnw'
       }
     }
 
-   stage('Start MySQL (Docker)') {
-  steps {
-    sh '''
-      set -e
+    // Optional but VERY useful to confirm Jenkins is using the right Jenkinsfile
+    stage('DEBUG - Show Jenkinsfile') {
+      steps {
+        sh '''
+          echo "===== Jenkinsfile used in this build ====="
+          ls -la
+          sed -n '1,220p' Jenkinsfile || true
+          echo "========================================="
+        '''
+      }
+    }
 
-      # Supprimer le container s’il existe (sans erreur)
-      docker rm -f ${MYSQL_CONTAINER} >/dev/null 2>&1 || true
+    stage('Start MySQL (Docker)') {
+      steps {
+        sh '''
+          set -e
 
-      echo "Starting MySQL on port ${MYSQL_HOST_PORT}..."
-      docker run -d --name ${MYSQL_CONTAINER} \
-        -e MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD} \
-        -e MYSQL_DATABASE=${MYSQL_DB} \
-        -e MYSQL_USER=${MYSQL_USER} \
-        -e MYSQL_PASSWORD=${MYSQL_PASSWORD} \
-        -p ${MYSQL_HOST_PORT}:3306 \
-        mysql:8.0
+          # Remove container if exists (do not fail if absent)
+          docker rm -f "${MYSQL_CONTAINER}" >/dev/null 2>&1 || true
 
-      echo "Waiting for MySQL to be ready (up to 120s)..."
-      READY=0
-      for i in $(seq 1 60); do
-        if docker exec ${MYSQL_CONTAINER} \
-          mysqladmin ping -uroot -p${MYSQL_ROOT_PASSWORD} --silent >/dev/null 2>&1; then
-          READY=1
-          break
-        fi
-        echo "  still starting... (${i}/60)"
-        sleep 2
-      done
+          echo "Starting MySQL on host port ${MYSQL_HOST_PORT}..."
+          docker run -d --name "${MYSQL_CONTAINER}" \
+            -e MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}" \
+            -e MYSQL_DATABASE="${MYSQL_DB}" \
+            -e MYSQL_USER="${MYSQL_USER}" \
+            -e MYSQL_PASSWORD="${MYSQL_PASSWORD}" \
+            -p "${MYSQL_HOST_PORT}":3306 \
+            mysql:8.0
 
-      if [ "$READY" -ne 1 ]; then
-        echo "MySQL failed to become ready in time"
-        docker logs ${MYSQL_CONTAINER} | tail -n 200 || true
-        exit 1
-      fi
+          echo "Waiting for MySQL to be ready (up to 120s)..."
+          for i in $(seq 1 60); do
+            if docker exec "${MYSQL_CONTAINER}" mysqladmin ping -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent >/dev/null 2>&1; then
+              echo "MySQL is ready ✅"
+              exit 0
+            fi
+            echo "  still starting... (${i}/60)"
+            sleep 2
+          done
 
-      echo "MySQL is ready ✅"
-    '''
-  }
-}
-
+          echo "MySQL failed to become ready in time"
+          docker logs "${MYSQL_CONTAINER}" | tail -n 200 || true
+          exit 1
+        '''
+      }
+    }
 
     stage('Prepare test DB config') {
       steps {
@@ -89,21 +90,14 @@ EOF
 
     stage('Build') {
       steps {
-        echo "Compilation du projet"
         sh './mvnw clean package -DskipTests'
       }
     }
 
     stage('Run Tests') {
       steps {
-        echo "Execution des tests"
+        // keep || true if you don't want tests to fail the pipeline
         sh './mvnw test -Dspring.profiles.active=test || true'
-      }
-    }
-
-    stage('Deploy') {
-      steps {
-        echo "Déploiement (si nécessaire)"
       }
     }
 
@@ -117,20 +111,14 @@ EOF
 
   post {
     always {
-      // Publier les résultats de tests si présents (ne casse pas si absents)
-      script {
-        try {
-          junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
-        } catch (e) {
-          echo "No test reports"
-        }
-      }
+      // Publish test reports if present
+      junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
 
       // Cleanup MySQL
-      sh 'docker rm -f "${MYSQL_CONTAINER}" || true'
+      sh 'docker rm -f "${MYSQL_CONTAINER}" >/dev/null 2>&1 || true'
     }
 
-    success { echo "Build réussi ✅" }
-    failure { echo "Build échoué ❌" }
+    success { echo "✅ Build réussi" }
+    failure { echo "❌ Build échoué" }
   }
 }
