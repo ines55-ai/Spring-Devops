@@ -1,8 +1,6 @@
 pipeline {
   agent any
   environment {
-    JAVA_HOME = '/usr/lib/jvm/java-17-openjdk'
-    PATH = "${JAVA_HOME}/bin:${env.PATH}"
     MYSQL_CONTAINER = 'mysql-ci'
     MYSQL_DB = 'spring_devops_db'
     MYSQL_USER = 'springuser'
@@ -21,11 +19,33 @@ pipeline {
         sh 'chmod +x ./mvnw'
       }
     }
+    stage('Verify Java') {
+      steps {
+        sh '''
+          echo "=== Checking Java installation ==="
+          which java || echo "java not in PATH"
+          java -version || echo "java command failed"
+          echo "=== Checking JAVA_HOME candidates ==="
+          ls -la /usr/lib/jvm/ || echo "No /usr/lib/jvm/ directory"
+          echo "=== Setting JAVA_HOME ==="
+          if [ -d "/usr/lib/jvm/java-17-openjdk" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
+          elif [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+          elif [ -d "/usr/lib/jvm/java-17" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17"
+          else
+            export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+          fi
+          echo "JAVA_HOME set to: $JAVA_HOME"
+          ls -la "$JAVA_HOME" || echo "JAVA_HOME path does not exist"
+        '''
+      }
+    }
     stage('Start MySQL (Docker)') {
       steps {
         sh '''
           set -e
-          # Remove container if exists
           docker rm -f "${MYSQL_CONTAINER}" 2>/dev/null || true
           
           echo "Starting MySQL on host port ${MYSQL_HOST_PORT}..."
@@ -76,19 +96,42 @@ EOF
     }
     stage('Build') {
       steps {
-        sh './mvnw clean package -DskipTests'
+        sh '''
+          # Detect and set JAVA_HOME
+          if [ -d "/usr/lib/jvm/java-17-openjdk" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
+          elif [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+          elif [ -d "/usr/lib/jvm/java-17" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17"
+          else
+            export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          
+          echo "Using JAVA_HOME: $JAVA_HOME"
+          java -version
+          
+          ./mvnw clean package -DskipTests
+        '''
       }
     }
     stage('Run Tests') {
       steps {
-        sh './mvnw test -Dspring.profiles.active=test'
-      }
-    }
-    stage('Check Java') {
-      steps {
         sh '''
-          java -version
-          echo "JAVA_HOME: $JAVA_HOME"
+          # Detect and set JAVA_HOME
+          if [ -d "/usr/lib/jvm/java-17-openjdk" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
+          elif [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+          elif [ -d "/usr/lib/jvm/java-17" ]; then
+            export JAVA_HOME="/usr/lib/jvm/java-17"
+          else
+            export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          
+          ./mvnw test -Dspring.profiles.active=test
         '''
       }
     }
